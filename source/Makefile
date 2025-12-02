@@ -23,6 +23,9 @@ DEBUGFLAGS = -mkl -g -fp-stack-check -O0 -check all -check bounds -check uninit 
 MODOUT = -module $(OUTPUT_DIR)
 LAPACKL =
 
+FFLAGS = -O0 -g -fbacktrace -ffree-line-length-none
+
+
 ifortVer_major = $(shell ifort -v 2>&1 | cut -d " " -f 3 | cut -d. -f 1)
 ifeq ($(shell test $(ifortVer_major) -gt 15; echo $$?),0)
 FFLAGS+= -qopenmp
@@ -114,6 +117,11 @@ LAPACKL +=  $(LINKMPI)
 F90C = $(MPIF90C)
 endif
 
+# ---- 本地强制设置 Fortran 编译器和兼容选项（conda gfortran-11）----
+override F90C = gfortran-11
+override FFLAGS += -std=legacy -fallow-argument-mismatch -fallow-invalid-boz
+
+
 #would like to embed this somehow..
 #GIT_HASHTAG = "git log --pretty=format:'%H:%cd' -n 1"
 
@@ -125,6 +133,8 @@ PARAMETERIZATION = $(OUTPUT_DIR)/CosmologyParameterizations.o
 GETDISTFLAGS = $(FFLAGS)
 F90FLAGS = $(FFLAGS) $(IFLAG)../camb/$(OUTPUT_DIR) $(INCLUDE)
 LINKFLAGS = -L../camb/$(OUTPUT_DIR) -lcamb_$(RECOMBINATION) $(LAPACKL) $(F90CRLINK) $(CLIKL)
+LINKFLAGS += -Wl,-macosx_version_min,10.9
+
 
 ifneq ($(PICO),)
 ifneq ($(PICO),NO)

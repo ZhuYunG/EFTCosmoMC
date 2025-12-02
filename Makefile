@@ -31,6 +31,8 @@ cosmomc_debug: ./source/*.*90 ./camb/*.*90
 camspec: ./source/*.*90 ./camb/*.*90
 	cd ./source && make highL=../highL PLANCKLIKE=cliklike_CamSpec
 
+FFLAGS += -O0 -g -fbacktrace -ffree-line-length-none
+
 clean:
 	cd ./source && make clean
 

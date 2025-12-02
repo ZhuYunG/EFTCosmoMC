@@ -62,7 +62,7 @@ eftcosmomc_debug: directories eftcamb $(OBJFILES)
 # EFTCAMB target:
 eftcamb:
 	cd ../EFTCAMB && \
-	$(MAKE) --file=Makefile_main libcamb OUTPUT_DIR=$(OUTPUT_DIR) \
+	$(MAKE)  libcamb OUTPUT_DIR=$(OUTPUT_DIR) \
 	RECOMBINATION=$(RECOMBINATION) EQUATIONS=equations_EFT NONLINEAR=halofit_ppf
 
 # clean targets:
