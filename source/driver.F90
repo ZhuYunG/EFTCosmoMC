@@ -103,6 +103,7 @@
     end if
 
     FeedBack = Ini%Read_Int('feedback',0)
+    logZero_trace = Ini%Read_Logical('logzero_trace', FeedBack >= 3)
 
     ! EFTCosmoMC MOD START: raise CAMB feedback if needed
     if ( FeedBack >= 3 ) then

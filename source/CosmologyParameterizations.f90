@@ -13,6 +13,8 @@
     use CosmoTheory
     use Calculator_Cosmology
     use bbn
+    use StringUtils, only : RealToStr
+    use settings, only : logZero, LogZeroTrace, logZero_trace
 
     ! EFTCosmoMC MOD START: add EFTCosmoMC modules
 #ifdef EFTCOSMOMC
@@ -144,11 +146,23 @@
     select type (CMB)
     class is (CMBParams)
         TP_NonBaseParameterPriors = logZero
-        if (CMB%H0 < this%H0_min .or. CMB%H0 > this%H0_max) return
-        if (CMB%zre < this%Use_min_zre) return
+        if (CMB%H0 < this%H0_min .or. CMB%H0 > this%H0_max) then
+            if (logZero_trace) call LogZeroTrace('TP_NonBaseParameterPriors: H0 outside prior', &
+                'H0='//trim(RealToStr(CMB%H0))//' range ['// &
+                trim(RealToStr(this%H0_min))//','//trim(RealToStr(this%H0_max))//']')
+            return
+        end if
+        if (CMB%zre < this%Use_min_zre) then
+            if (logZero_trace) call LogZeroTrace('TP_NonBaseParameterPriors: zre below minimum', 'zre='//trim(RealToStr(CMB%zre)))
+            return
+        end if
         if (CMB%omnuh2_sterile > 0 .and. CMB%nnu > standard_neutrino_neff) then
             !Check if physical mass of thermal massive sterile too big (look like CDM, so don't need to model separately)
-            if (CMB%omnuh2_sterile*neutrino_mass_fac/(CMB%nnu-standard_neutrino_neff)**0.75_mcp > this%sterile_mphys_max) return
+            if (CMB%omnuh2_sterile*neutrino_mass_fac/(CMB%nnu-standard_neutrino_neff)**0.75_mcp > this%sterile_mphys_max) then
+                if (logZero_trace) call LogZeroTrace('TP_NonBaseParameterPriors: sterile mass prior failed', &
+                    'omnuh2_sterile='//trim(RealToStr(CMB%omnuh2_sterile)))
+                return
+            end if
         end if
         TP_NonBaseParameterPriors = 0
         if (this%H0_prior_mean/=0._mcp) then
@@ -195,6 +209,7 @@
             call SetForH(Params,CMB,try_b, .true.,error)  !JD for bbn related errors
             if(error/=0)then
                 cmb%H0=0
+                if (logZero_trace) call LogZeroTrace('TP_ParamArrayToTheoryParams: SetForH signaled error, H0 set to 0')
                 return
             end if
             D_b = CosmoCalc%CMBToTheta(CMB)
@@ -207,6 +222,7 @@
                 if ( D_b == 0._dl .and. D_t == 0._dl ) then
                     ! the model is unstable. Reject the sample.
                     CMB%H0=0
+                    if (logZero_trace) call LogZeroTrace('TP_ParamArrayToTheoryParams: EFTCAMB stability flagged (D_b and D_t zero), H0 set to 0')
                     ! print some optional feedback and then return
                     if ( CMB%EFTCAMB_parameters%EFTCAMB_feedback_level > 1 ) then
                         write(*,'(a)') '***************************************************************'
@@ -221,6 +237,8 @@
             if (DA < D_b .or. DA > D_t) then
                 if (Feedback>1) write(*,*) instance, 'Out of range finding H0: ', real(Params(3))
                 cmb%H0=0 !Reject it
+                if (logZero_trace) call LogZeroTrace('TP_ParamArrayToTheoryParams: DA outside [D_b,D_t], H0 set to 0', &
+                    'DA='//trim(RealToStr(DA))//' Db='//trim(RealToStr(D_b))//' Dt='//trim(RealToStr(D_t)))
             else
                 lasttry = -1
                 do
@@ -231,6 +249,8 @@
                         if ( D_try == 0._dl ) then
                             ! the model is unstable. Reject the sample.
                             CMB%H0=0
+                            if (logZero_trace) call LogZeroTrace('TP_ParamArrayToTheoryParams: EFTCAMB instability during H0 solve, H0 set to 0', &
+                                'D_try=0 at mid H0')
                             ! print some optional feedback and then return
                             if ( CMB%EFTCAMB_parameters%EFTCAMB_feedback_level > 1 ) then
                                 write(*,'(a)') '***************************************************************'

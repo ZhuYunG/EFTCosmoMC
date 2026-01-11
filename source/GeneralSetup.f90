@@ -8,6 +8,7 @@
     use minimize
     use IO
     use ParamPointSet
+    use settings, only : LogZeroTrace, logZero
     implicit none
 
     integer, parameter :: action_MCMC=0, action_importance=1, action_maxlike=2, action_hessian=3, action_tests=4
@@ -163,6 +164,7 @@
     write(*,*) '   loglike     chi-sq'
     if (Feedback <=2) call DataLikelihoods%WriteLikelihoodContribs(stdout, Params%likelihoods)
     if (logLike == logZero) then
+        call LogZeroTrace('TSetup_DoTests: overall logLike is logZero')
         write(*,*) 'Test likelihoods done, parameter point rejected (logZero or outside prior)'
     else
         if (output_root/='') then

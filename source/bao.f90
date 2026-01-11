@@ -19,6 +19,7 @@
     module bao
     use MatrixUtils
     use settings
+    use StringUtils, only : RealToStr
     use CosmologyTypes
     use CosmoTheory
     use Calculator_Cosmology
@@ -368,6 +369,8 @@
     if ((alpha_perp < this%alpha_perp_file(1)).or.(alpha_perp > this%alpha_perp_file(this%alpha_npoints_perp-1)).or. &
         &   (alpha_plel < this%alpha_plel_file(1)).or.(alpha_plel > this%alpha_plel_file(this%alpha_npoints_plel-1))) then
         BAO_DR1x_loglike = logZero
+        if (logZero_trace) call LogZeroTrace('BAO_DR1x_loglike: alpha outside table', 'alpha_perp='//trim(RealToStr(alpha_perp))// &
+            ' alpha_par='//trim(RealToStr(alpha_plel)))
     else
         do i=1,this%alpha_npoints_perp
             if (alpha_perp - this%alpha_perp_file(i) .le. 0) then
@@ -390,6 +393,7 @@
             BAO_DR1x_loglike = -log( prob )
         else
             BAO_DR1x_loglike = logZero
+            if (logZero_trace) call LogZeroTrace('BAO_DR1x_loglike: interpolated prob <= 0', 'prob='//trim(RealToStr(prob)))
         endif
     endif
     end function BAO_DR1x_loglike
@@ -420,6 +424,7 @@
     alphamgs =   this%Calculator%BAO_D_v(this%bao_z(1))/this%get_rs_drag(Theory) / (DVfidmgs / rsfidmgs)
     if ((alphamgs > alpha_max).or.(alphamgs < alpha_min)) then
         BAO_MGS_loglike = logZero
+        if (logZero_trace) call LogZeroTrace('BAO_MGS_loglike: alpha outside allowed range', 'alpha='//trim(RealToStr(alphamgs)))
     else
         ii = 1+floor((alphamgs - alpha_min)/0.001)
         chi2 = (this%alpha_prob(ii) + this%alpha_prob(ii+1))/2.0

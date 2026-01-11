@@ -33,7 +33,7 @@
     character(LEN=Ini_max_string_len) FITSfilename
 #endif
 
-    logical bad
+    logical bad, background_only
 
     InputFile = ''
     if (GetParamCount() /= 0)  InputFile = GetParam(1)
@@ -43,6 +43,8 @@
     if (bad) error stop 'Error opening parameter file'
 
     Ini_fail_on_not_found = .false.
+
+    background_only = Ini_Read_Logical('background_only', .false.)
 
     outroot = Ini_Read_String('output_root')
     if (outroot /= '') outroot = trim(outroot) // '_'
@@ -55,12 +57,21 @@
     P%WantVectors = Ini_Read_Logical('get_vector_cls',.false.)
     P%WantTensors = Ini_Read_Logical('get_tensor_cls',.false.)
 
+    if (background_only) then
+        P%WantScalars = .false.
+        P%WantVectors = .false.
+        P%WantTensors = .false.
+    end if
+
     P%OutputNormalization=outNone
     output_factor = Ini_Read_Double('CMB_outputscale',1.d0)
 
     P%WantCls= P%WantScalars .or. P%WantTensors .or. P%WantVectors
 
     P%PK_WantTransfer=Ini_Read_Logical('get_transfer')
+    if (background_only) then
+        P%PK_WantTransfer = .false.
+    end if
 
     AccuracyBoost  = Ini_Read_Double('accuracy_boost',AccuracyBoost)
     lAccuracyBoost = Ini_Read_Real('l_accuracy_boost',lAccuracyBoost)
@@ -320,6 +331,18 @@
     end if
 
     call Ini_Close
+
+    if (background_only) then
+        P%DoLensing = .false.
+        P%WantCls = .false.
+        P%WantTransfer = .false.
+        call CAMBParams_Set(P)
+        if (global_error_flag/=0) then
+            write(*,*) 'Error result '//trim(global_error_message)
+            error stop
+        end if
+        stop
+    end if
 
     if (.not. CAMB_ValidateParams(P)) error stop 'Stopped due to parameter error'
 

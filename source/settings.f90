@@ -60,6 +60,7 @@
     !Does not affect MCMC (except making it all slower)
 
     logical :: flush_write = .true.
+    logical :: logZero_trace = .false.
 
     logical :: new_chains = .true.
 
@@ -129,12 +130,29 @@
 
     contains
 
+    subroutine LogZeroTrace(tag, detail)
+    character(LEN=*), intent(in) :: tag
+    character(LEN=*), intent(in), optional :: detail
+    character(LEN=:), allocatable :: message
+
+    if (.not. logZero_trace) return
+
+    if (present(detail)) then
+        message = trim(tag)//' | '//trim(detail)
+    else
+        message = trim(tag)
+    end if
+
+    write(*,'("[LOGZERO]",1x,i0,": ",a)') MPIRank, trim(message)
+    end subroutine LogZeroTrace
+
     subroutine InitializeGlobalSettingDefaults
     character, parameter :: backslash = char(92)
 
     DataDir='data/'
     LocalDir='./'
     chisq_label = backslash//'chi^2_{'//backslash//'rm %s}'
+    logZero_trace = .false.
 
     end subroutine InitializeGlobalSettingDefaults
 

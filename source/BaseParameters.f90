@@ -261,6 +261,8 @@
     integer, intent(in), optional :: indices(:)
     logical, intent(in), optional :: add_derived
 
+    if (.not. allocated(this%NameMapping%name)) &
+        & call MpiStop('OutputParamNames: NameMapping not initialized')
     call this%NameMapping%WriteFile(trim(fname)//'.paramnames', indices, add_derived)
 
     end subroutine TBaseParameters_OutputParamNames

@@ -41,14 +41,14 @@
 
 
     function PresentDefault_S(default, S) result(Sout)
-    character(LEN=*), intent(in), target :: default
-    character(LEN=*), intent(in), target, optional :: S
-    character(LEN=:), pointer :: Sout
+    character(LEN=*), intent(in) :: default
+    character(LEN=*), intent(in), optional :: S
+    character(LEN=:), allocatable :: Sout
 
     if (present(S)) then
-        SOut => S
+        SOut = S
     else
-        SOut => default
+        SOut = default
     end if
     end function PresentDefault_S
 
@@ -103,13 +103,13 @@
 
     function IfThenElse_S(flag, either, or) result(IfThenElse)
     logical, intent(in) :: flag
-    character(LEN=:), pointer :: IfThenElse
-    character(LEN=*), target :: either, or
+    character(LEN=:), allocatable :: IfThenElse
+    character(LEN=*), intent(in) :: either, or
 
     if (flag) then
-        IfThenElse => either
+        IfThenElse = either
     else
-        IfThenElse => or
+        IfThenElse = or
     end if
 
     end function

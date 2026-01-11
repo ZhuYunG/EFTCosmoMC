@@ -4,6 +4,8 @@
     use BaseParameters
     use MatrixUtils
     use MiscUtils
+    use StringUtils, only : RealToStr
+    use settings, only : logZero, LogZeroTrace, logZero_trace
     implicit none
     private
 
@@ -72,6 +74,7 @@
 
     if (CurrentLike/=LogZero) then
         if (LikeToAdd == logZero) then
+            call LogZeroTrace('AddLike: component returned logZero')
             CurrentLike = LogZero
         else
             CurrentLike = CurrentLike + LikeToAdd
@@ -86,6 +89,7 @@
 
     if (CurrentLike/=LogZero) then
         if (LikeToAdd == logZero) then
+            call LogZeroTrace('AddLikeTemp: component returned logZero at temperature scaling')
             CurrentLike = LogZero
         else
             CurrentLike = CurrentLike + LikeToAdd/this%Temperature
@@ -98,10 +102,28 @@
     class(TLikeCalculator) :: this
     class(TCalculationAtParamPoint):: Params
     real(mcp) :: GetLogLikeBounds
+    integer :: bad_index
+    logical :: found_bad
 
     if (any(Params%P(:num_params) > BaseParams%PMax(:num_params)) .or. &
         & any(Params%P(:num_params) < BaseParams%PMin(:num_params))) then
-    GetLogLikeBounds = logZero
+        GetLogLikeBounds = logZero
+        if (logZero_trace) then
+            found_bad = .false.
+            do bad_index = 1, num_params
+                if (Params%P(bad_index) > BaseParams%PMax(bad_index) .or. &
+                    Params%P(bad_index) < BaseParams%PMin(bad_index)) then
+                    call LogZeroTrace('GetLogLikeBounds: parameter out of range', &
+                        trim(BaseParams%NameMapping%NameOrNumber(bad_index))//'='// &
+                        trim(RealToStr(Params%P(bad_index)))//' in ['// &
+                        trim(RealToStr(BaseParams%PMin(bad_index)))//','// &
+                        trim(RealToStr(BaseParams%PMax(bad_index)))//']')
+                    found_bad = .true.
+                    exit
+                end if
+            end do
+            if (.not. found_bad) call LogZeroTrace('GetLogLikeBounds: parameter outside bounds (index not found)')
+        end if
     else
         GetLogLikeBounds=0
     end if
@@ -139,14 +161,21 @@
     real(mcp) GetLogLike
 
     GetLogLike = this%GetLogLikeBounds(Params)
-    if (GetLogLike==LogZero) return
+    if (GetLogLike==LogZero) then
+        call LogZeroTrace('GetLogLike: bounds rejected point')
+        return
+    end if
     if (this%test_likelihood) then
         call this%AddLikeTemp(GetLogLike,this%TestLikelihoodFunction(Params))
     else
         call this%AddLikeTemp(GetLogLike,this%GetLogLikeMain(Params))
     end if
-    if (GetLogLike==LogZero) return
+    if (GetLogLike==LogZero) then
+        call LogZeroTrace('GetLogLike: main likelihood returned logZero')
+        return
+    end if
     call this%AddLikeTemp(GetLogLike,this%getLogPriors(Params%P))
+    if (GetLogLike==LogZero) call LogZeroTrace('GetLogLike: parameter priors returned logZero')
 
     end function GetLogLike
 
@@ -298,7 +327,10 @@
 
     call this%SetTheoryParams(Params)
     LogLike = this%Config%Parameterization%NonBaseParameterPriors(this%TheoryParams)
-    if (LogLike == logZero) return
+    if (LogLike == logZero) then
+        call LogZeroTrace('TheoryLike_GetLogLikeMain: NonBaseParameterPriors rejected point')
+        return
+    end if
     if (.not. Params%validInfo) then
         this%changeMask(1:num_params) = .true.
     else
@@ -311,7 +343,10 @@
     else
         LogLike = logZero
     end if
-    if (LogLike==logZero) return
+    if (LogLike==logZero) then
+        call LogZeroTrace('TheoryLike_GetLogLikeMain: logZero after theory calculation (CalcChanges or GetLogLikeWithTheorySet)')
+        return
+    end if
 
     if (Feedback>2) call DataLikelihoods%WriteLikelihoodContribs(stdout, Params%likelihoods)
 
@@ -323,10 +358,14 @@
     class(TCalculationAtParamPoint) :: Params
 
     CheckPriorCuts = this%GetLogLikeBounds(Params)
-    if (CheckPriorCuts==LogZero) return
+    if (CheckPriorCuts==LogZero) then
+        call LogZeroTrace('TheoryLike_CheckPriorCuts: bounds rejected point')
+        return
+    end if
 
     call this%SetTheoryParams(Params)
     CheckPriorCuts = this%Config%Parameterization%NonBaseParameterPriors(this%TheoryParams)
+    if (CheckPriorCuts==LogZero) call LogZeroTrace('TheoryLike_CheckPriorCuts: NonBaseParameterPriors rejected point')
 
     end function TheoryLike_CheckPriorCuts
 
@@ -339,17 +378,27 @@
     logical, optional, intent(in) :: do_like(DataLikelihoods%count)
 
     LogLike = this%GetLogLikeBounds(Params)
-    if (LogLike==LogZero) return
+    if (LogLike==LogZero) then
+        call LogZeroTrace('TheoryLike_GetLogLikePost: bounds rejected point')
+        return
+    end if
 
     this%SlowChanged = .false.
     this%ChangeMask = .true.
 
     call this%SetTheoryParams(Params)
     call this%AddLikeTemp(LogLike,this%Config%Parameterization%NonBaseParameterPriors(this%TheoryParams))
-    if (LogLike == logZero) return
+    if (LogLike == logZero) then
+        call LogZeroTrace('TheoryLike_GetLogLikePost: NonBaseParameterPriors rejected point')
+        return
+    end if
     call this%AddLikeTemp(LogLike, this%GetLogLikeWithTheorySet(do_like))
-    if (LogLike == logZero) return
+    if (LogLike == logZero) then
+        call LogZeroTrace('TheoryLike_GetLogLikePost: data likelihood returned logZero')
+        return
+    end if
     call this%AddLikeTemp(LogLike, this%GetLogPriors(Params%P))
+    if (LogLike == logZero) call LogZeroTrace('TheoryLike_GetLogLikePost: parameter priors returned logZero')
 
     end function TheoryLike_GetLogLikePost
 
@@ -379,7 +428,10 @@
                 if (this%timing) call Timer%Start
                 itemLike = like%GetLogLike(this%TheoryParams, this%Params%Theory, this%Params%P(like%nuisance_indices))
                 if (this%timing) call Timer%WriteTime('Time for '//trim(like%name))
-                if (itemLike == logZero) return
+                if (itemLike == logZero) then
+                    call LogZeroTrace('TheoryLike_GetLogLikeWithTheorySet: data likelihood returned logZero', trim(like%name))
+                    return
+                end if
                 this%Params%Likelihoods(i) = itemLike
             end if
         end if

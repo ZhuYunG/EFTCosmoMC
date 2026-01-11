@@ -57,7 +57,7 @@ ifeq "$(gfortErr)" "0"
 COMPILER = gfortran
 #Gfortran compiler:
 #The options here work in v4.6+. Python wrapper needs v4.9+.
-F90C     = gfortran
+F90C     = gfortran-11
 SFFLAGS =  -shared -fPIC
 
 FFLAGS =  -O3 -fopenmp -ffast-math -fmax-errors=4

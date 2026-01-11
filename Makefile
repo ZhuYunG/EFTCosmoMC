@@ -29,9 +29,10 @@ cosmomc_debug: ./source/*.*90 ./camb/*.*90
 	cd ./source && make cosmomc_debug OUTPUT_DIR=Debug BUILD=$(BUILD)
 
 camspec: ./source/*.*90 ./camb/*.*90
-	cd ./source && make highL=../highL PLANCKLIKE=cliklike_CamSpec
+	cd ./source && make highL=../highL PLANCKLIKE=cliklike_CamSpec 
 
-FFLAGS += -O0 -g -fbacktrace -ffree-line-length-none
+FFLAGS += -O0 -g -fbacktrace -ffree-line-length-none -fcheck=all -finit-real=nan -fno-omit-frame-pointer
+
 
 clean:
 	cd ./source && make clean

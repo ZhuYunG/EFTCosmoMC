@@ -7,6 +7,7 @@
     use RandUtils
     use propose
     use ParamPointSet
+    use settings, only : LogZeroTrace, logZero
     implicit none
     private
 
@@ -149,8 +150,9 @@
                 if (mod(this%num_sample,100*this%Oversample_fast)==0) call CheckParamChange
             end if
         else
-            if (this%num_sample > 1000) then
-                call DoAbort('MCMC.f90: Couldn''t start after 1000 tries - check starting ranges')
+            call LogZeroTrace('TChainSampler_SampleFrom: logZero like, retrying start point')
+            if (this%num_sample > 1000000) then
+                call DoAbort('MCMC.f90: Couldn''t start after 1000000 tries - check starting ranges')
             end if
         end if
     end do
@@ -277,6 +279,7 @@
     call this%Proposer%GetProposal(Trial%P)
 
     Like = this%LogLike(Trial)
+    if (Like == logZero) call LogZeroTrace('TMetropolisSampler_GetNewSample: proposal produced logZero')
     if (Feedback > 1) write (*,*) instance, 'Likelihood: ', real(Like), 'Current Like:', real(CurLike)
 
     if (Like /= logZero) then
@@ -318,6 +321,7 @@
     call this%Proposer%GetProposalFast(Trial%P)
 
     Like = this%LogLike(Trial)
+    if (Like == logZero) call LogZeroTrace('TMetropolisSampler_FastParameterSample: fast proposal produced logZero')
     if (Like /= logZero) then
         accpt = this%MetropolisAccept(Like, CurLike)
     else
@@ -350,6 +354,7 @@
     real(mcp) frac, delta(num_params)
 
     if (CurLike == LogZero .or. BaseParams%num_fast==0 .or. BaseParams%num_slow ==0) then
+        if (CurLike == logZero) call LogZeroTrace('TFastDraggingSampler_GetNewSample: current like is logZero, fallback to metropolis')
         call this%GetNewMetropolisSample(CurParams, CurLike, mult)
         return
     end if
@@ -368,6 +373,7 @@
 
     CurEndLike = this%LogLike(TrialEnd)
     if (CurEndLike==logZero) then
+        call LogZeroTrace('TFastDraggingSampler_GetNewSample: proposed slow move logZero at end point')
         call TrialEnd%Clear(keep=CurParams)
         mult = mult + 1
         return
@@ -391,6 +397,7 @@
         TrialEnd = CurEndParams
         TrialEnd%P(1:num_params) = TrialEnd%P(1:num_params) + delta
         EndLike = this%LogLike(TrialEnd)
+        if (EndLike == logZero) call LogZeroTrace('TFastDraggingSampler_GetNewSample: intermediate EndLike logZero')
         accpt = EndLike /= logZero
 
         if (accpt) then
@@ -398,6 +405,7 @@
             TrialStart = CurStartParams
             TrialStart%P(1:num_params) = TrialStart%P(1:num_params)  + delta
             StartLike = this%LogLike(TrialStart)
+            if (StartLike == logZero) call LogZeroTrace('TFastDraggingSampler_GetNewSample: intermediate StartLike logZero')
             accpt = StartLike/=logZero
 
             if (accpt) then

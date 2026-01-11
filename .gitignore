@@ -10,6 +10,8 @@
 *.o
 *.a
 *.pyc
+Horndeski_sample_*.dat
+*.dat
 
 # ignore the link to the planck data library
 data/clik

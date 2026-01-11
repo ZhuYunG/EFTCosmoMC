@@ -374,7 +374,7 @@
         wantCom = .false.
     end if
 
-    if (i> this%nnames) call MpiStop('ParamNames_AsString: index out of range')
+    if (i < 1 .or. i> this%nnames) call MpiStop('ParamNames_AsString: index out of range')
     Line = trim(this%name(i))
     if (this%is_derived(i)) Line = Line // '*'
     Line =  Line//char(9)//trim(this%label(i))
@@ -389,28 +389,31 @@
     character(LEN=*), intent(in) :: fname
     integer, intent(in), optional :: indices(:)
     logical, intent(in), optional :: add_derived
-    integer i
-    Type(TTextFile) :: F
+    integer i, unit_ix
+    character(LEN=:), allocatable :: line
 
-    call F%CreateFile(fname)
+    open(newunit=unit_ix, file=fname, status='replace', action='write')
     if (present(indices)) then
         do i=1, size(indices)
-            call F%Write(this%AsString(indices(i)))
+            if (indices(i) < 1 .or. indices(i) > this%nnames) &
+                & call MpiStop('ParamNames_WriteFile: index out of range')
+            line = this%AsString(indices(i))
+            write(unit_ix,'(A)') trim(line)
         end do
         if (present(add_derived)) then
             if (add_derived) then
                 do i=1,this%num_derived
-                    call F%Write(this%AsString(this%num_mcmc+i))
+                    write(unit_ix,'(A)') trim(this%AsString(this%num_mcmc+i))
                 end do
             end if
         end if
     else
         do i=1, this%nnames
-            call F%Write(this%AsString(i))
+            write(unit_ix,'(A)') trim(this%AsString(i))
         end do
     end if
 
-    call F%Close()
+    close(unit_ix)
 
     end subroutine ParamNames_WriteFile
 

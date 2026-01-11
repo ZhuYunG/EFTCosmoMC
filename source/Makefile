@@ -57,7 +57,7 @@ else
 #gfortran 5.x and earlier will not work (many F2003 bugs)
 #gfortran 6 should work
 #see CosmoBox virtual machines for stable environments
-F90C = gfortran
+F90C = gfortran-11
 FFLAGS = -cpp -O3 -ffast-math -ffree-line-length-none -fopenmp -fmax-errors=4
 DEBUGFLAGS = -cpp -g -fbounds-check -fbacktrace -ffree-line-length-none -fopenmp -fmax-errors=4 -ffpe-trap=invalid,overflow,zero
 MODOUT =  -J$(OUTPUT_DIR)
