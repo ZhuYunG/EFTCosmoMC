@@ -5,6 +5,7 @@ Build an ensemble probability density plot for wDE from .dat files.
 from __future__ import annotations
 
 from pathlib import Path
+import csv
 import sys
 
 import numpy as np
@@ -18,22 +19,23 @@ from matplotlib.colors import LogNorm
 # Editable parameters
 # -------------------------
 folder = "EFTCAMB"
-folders = ["/Volumes/My Passport/Horndeski_samples_py_onlybackground_3"]  # If non-empty, read from multiple folders (overrides `folder`)
+folders = ["/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a00_1"]  # If non-empty, read from multiple folders (overrides `folder`)
 pattern = "Horndeski_sample_*.dat"
-out_folder = "/Volumes/My Passport/plots"
+out_folder = "/Users/dcz/data/plots_a00_1"
 
 use_a = False  # False -> use z (col 2), True -> use a (col 1)
-zmin = 0.0  # e.g. 0.0; use None to disable
+zmin = 0.1  # e.g. 0.0; use None to disable
 zmax = 6.0  # e.g. 2.0; use None to disable
 
 wmin, wmax = -2.0, 1.0
 n_wbin = 250
 
-smooth_sigma = 0.0  # set >0 to enable Gaussian smoothing in w direction
+smooth_sigma = 0.15  # set >0 to enable Gaussian smoothing in w direction
 use_log = False  # optional log color scale
 reverse_cmap = False
 add_colorbar = True
 show_legend = False
+x_log10 = True  # log10 scale for x-axis (requires positive x)
 
 dpi = 500
 write_quantiles = True
@@ -45,6 +47,12 @@ figsize = (7.5, 4.8)
 trim_frac = 0.15  # drop top fraction by spike score; 0 disables
 trim_quantile = None  # e.g. 0.995; ignored if trim_frac > 0
 write_trim_report = True
+
+# Weight options
+weight_csv = "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a00_1.csv"  # path or list of paths; CSV has N columns, see weight_col
+weight_col = 8  # 0-based index; 8 -> 9th column
+weight_key_mode = "auto"  # "auto", "path", or "basename"
+missing_weight = "skip"  # "skip", "unity", or "error"
 # -------------------------
 
 
@@ -75,6 +83,127 @@ def collect_paths(folder_paths: list[Path], pattern: str) -> list[Path]:
     for folder_path in folder_paths:
         paths.extend(folder_path.glob(pattern))
     return sorted(set(paths))
+
+
+def normalize_csv_paths(paths: list[str] | str | Path | None) -> list[Path]:
+    if paths is None:
+        return []
+    if isinstance(paths, (str, Path)):
+        return [Path(paths)]
+    return [Path(p) for p in paths]
+
+
+def load_weight_map(
+    csv_paths: list[Path], weight_col: int
+) -> tuple[dict[str, float], dict[str, float | None], dict]:
+    path_map: dict[str, float] = {}
+    base_map: dict[str, float | None] = {}
+    base_src: dict[str, str] = {}
+    stats = {
+        "rows": 0,
+        "bad_cols": 0,
+        "bad_weight": 0,
+        "empty_key": 0,
+        "duplicate_key": 0,
+        "ambiguous_base": 0,
+        "missing_file": 0,
+    }
+
+    for csv_path in csv_paths:
+        if not csv_path.exists():
+            stats["missing_file"] += 1
+            continue
+        with csv_path.open("r", encoding="utf-8") as handle:
+            reader = csv.reader(handle)
+            for row in reader:
+                if not row:
+                    continue
+                if row[0].lstrip().startswith("#"):
+                    continue
+                stats["rows"] += 1
+                if len(row) <= weight_col:
+                    stats["bad_cols"] += 1
+                    continue
+                key = row[0].strip()
+                if not key:
+                    stats["empty_key"] += 1
+                    continue
+                try:
+                    weight = float(row[weight_col])
+                except ValueError:
+                    stats["bad_weight"] += 1
+                    continue
+                if key in path_map:
+                    stats["duplicate_key"] += 1
+                path_map[key] = weight
+                base = Path(key).name
+                if base in base_src and base_src[base] != key:
+                    base_map[base] = None
+                elif base not in base_map:
+                    base_map[base] = weight
+                    base_src[base] = key
+
+    stats["ambiguous_base"] = sum(1 for v in base_map.values() if v is None)
+    return path_map, base_map, stats
+
+
+def match_weights(
+    paths: list[Path],
+    path_map: dict[str, float],
+    base_map: dict[str, float | None],
+    key_mode: str,
+    missing_policy: str,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    weights = np.full(len(paths), np.nan, dtype=float)
+    stats = {
+        "matched_path": 0,
+        "matched_basename": 0,
+        "missing": 0,
+        "ambiguous_basename": 0,
+        "bad_weight": 0,
+    }
+
+    for i, path in enumerate(paths):
+        weight = None
+        key = str(path)
+        key_resolved = str(path.resolve())
+        if key_mode in ("auto", "path"):
+            if key in path_map:
+                weight = path_map[key]
+                stats["matched_path"] += 1
+            elif key_resolved in path_map:
+                weight = path_map[key_resolved]
+                stats["matched_path"] += 1
+        if weight is None and key_mode in ("auto", "basename"):
+            base = path.name
+            if base in base_map:
+                if base_map[base] is None:
+                    stats["ambiguous_basename"] += 1
+                else:
+                    weight = base_map[base]
+                    stats["matched_basename"] += 1
+
+        if weight is None:
+            stats["missing"] += 1
+        else:
+            weights[i] = weight
+
+    bad_mask = ~np.isfinite(weights) | (weights < 0)
+    stats["bad_weight"] = int(np.count_nonzero(bad_mask))
+    if stats["bad_weight"] > 0:
+        weights[bad_mask] = np.nan
+
+    if missing_policy == "unity":
+        weights[np.isnan(weights)] = 1.0
+        keep_mask = np.ones(len(paths), dtype=bool)
+    elif missing_policy == "error":
+        if np.isnan(weights).any():
+            raise ValueError("Missing or invalid weights with missing_weight='error'.")
+        keep_mask = np.ones(len(paths), dtype=bool)
+    else:
+        keep_mask = np.isfinite(weights)
+
+    return weights, keep_mask, stats
 
 
 def load_wde_samples(
@@ -155,16 +284,18 @@ def load_wde_samples(
     return W, grid_ref, z_ref, skip, good_paths
 
 
-def build_density(W: np.ndarray, w_bins: np.ndarray) -> np.ndarray:
+def build_density(W: np.ndarray, w_bins: np.ndarray, weights: np.ndarray) -> np.ndarray:
     n_grid = W.shape[1]
     n_wbin = len(w_bins) - 1
     D = np.zeros((n_grid, n_wbin), dtype=float)
     for i in range(n_grid):
         vals = W[:, i]
-        vals = vals[np.isfinite(vals)]
-        if vals.size == 0:
+        mask = np.isfinite(vals) & np.isfinite(weights) & (weights >= 0)
+        if not np.any(mask):
             continue
-        pdf, _ = np.histogram(vals, bins=w_bins, density=True)
+        pdf, _ = np.histogram(
+            vals[mask], bins=w_bins, weights=weights[mask], density=True
+        )
         D[i, :] = pdf
     return D
 
@@ -180,11 +311,44 @@ def smooth_density(D: np.ndarray, sigma: float) -> np.ndarray:
     return gaussian_filter1d(D, sigma=sigma, axis=1, mode="nearest")
 
 
-def compute_stats(W: np.ndarray) -> tuple[np.ndarray, ...]:
-    mean = np.nanmean(W, axis=0)
-    q16, q84 = np.nanquantile(W, [0.16, 0.84], axis=0)
-    q025, q975 = np.nanquantile(W, [0.025, 0.975], axis=0)
-    q005, q995 = np.nanquantile(W, [0.005, 0.995], axis=0)
+def weighted_quantile(values: np.ndarray, weights: np.ndarray, qs: np.ndarray) -> np.ndarray:
+    if values.size == 0:
+        return np.full_like(qs, np.nan, dtype=float)
+    sorter = np.argsort(values)
+    v_sorted = values[sorter]
+    w_sorted = weights[sorter]
+    cdf = np.cumsum(w_sorted)
+    if cdf[-1] <= 0:
+        return np.full_like(qs, np.nan, dtype=float)
+    cdf /= cdf[-1]
+    return np.interp(qs, cdf, v_sorted)
+
+
+def compute_stats(W: np.ndarray, weights: np.ndarray) -> tuple[np.ndarray, ...]:
+    n_grid = W.shape[1]
+    mean = np.full(n_grid, np.nan, dtype=float)
+    q16 = np.full(n_grid, np.nan, dtype=float)
+    q84 = np.full(n_grid, np.nan, dtype=float)
+    q025 = np.full(n_grid, np.nan, dtype=float)
+    q975 = np.full(n_grid, np.nan, dtype=float)
+    q005 = np.full(n_grid, np.nan, dtype=float)
+    q995 = np.full(n_grid, np.nan, dtype=float)
+
+    qs = np.array([0.16, 0.84, 0.025, 0.975, 0.005, 0.995], dtype=float)
+    for i in range(n_grid):
+        vals = W[:, i]
+        mask = np.isfinite(vals) & np.isfinite(weights) & (weights >= 0)
+        if not np.any(mask):
+            continue
+        v = vals[mask]
+        w = weights[mask]
+        w_sum = np.sum(w)
+        if w_sum <= 0:
+            continue
+        mean[i] = np.sum(v * w) / w_sum
+        q_vals = weighted_quantile(v, w, qs)
+        q16[i], q84[i], q025[i], q975[i], q005[i], q995[i] = q_vals
+
     return mean, q16, q84, q025, q975, q005, q995
 
 
@@ -219,10 +383,11 @@ def compute_spike_scores(W: np.ndarray) -> np.ndarray:
 
 def apply_trimming(
     W: np.ndarray,
+    weights: np.ndarray,
     paths: list[Path],
     trim_frac: float,
     trim_quantile: float | None,
-) -> tuple[np.ndarray, list[Path], np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, list[Path], np.ndarray, np.ndarray]:
     if trim_frac < 0 or trim_frac >= 1.0:
         raise ValueError("trim_frac must be in [0, 1).")
     if trim_quantile is not None and not (0.0 < trim_quantile < 1.0):
@@ -264,7 +429,7 @@ def apply_trimming(
     print(f"Spike trimming summary: trimmed={trimmed_total} kept={kept_total}")
 
     kept_paths = [p for p, keep in zip(paths, keep_mask) if keep]
-    return W[keep_mask], kept_paths, keep_mask, scores
+    return W[keep_mask], weights[keep_mask], kept_paths, keep_mask, scores
 
 
 def plot_density(
@@ -280,6 +445,7 @@ def plot_density(
     reverse_cmap: bool,
     add_colorbar: bool,
     show_legend: bool,
+    x_log10: bool,
     dpi: int,
     log_vmin: float | None,
 ) -> None:
@@ -320,7 +486,11 @@ def plot_density(
     ax.plot(grid, q005, color="white", ls="-.", lw=1.0, label="99%")
     ax.plot(grid, q995, color="white", ls="-.", lw=1.0)
 
-    ax.set_xlabel(grid_label)
+    if x_log10:
+        ax.set_xscale("log", base=10)
+        ax.set_xlabel(f"{grid_label} (log10)")
+    else:
+        ax.set_xlabel(grid_label)
     ax.set_ylabel("w")
     ax.set_ylim(wmin, wmax)
     ax.set_xlim(grid.min(), grid.max())
@@ -379,14 +549,47 @@ def main() -> int:
     out_dir = out_dir.resolve()
     print(f"Output directory: {out_dir}")
 
+    weights = np.ones(W.shape[0], dtype=float)
+    csv_paths = normalize_csv_paths(weight_csv)
+    if csv_paths:
+        path_map, base_map, weight_stats = load_weight_map(csv_paths, weight_col)
+        weights, weight_keep_mask, match_stats = match_weights(
+            good_paths, path_map, base_map, weight_key_mode, missing_weight
+        )
+        print(
+            "Weight map: "
+            f"rows={weight_stats['rows']} missing_files={weight_stats['missing_file']} "
+            f"bad_cols={weight_stats['bad_cols']} bad_weight={weight_stats['bad_weight']} "
+            f"duplicate_key={weight_stats['duplicate_key']} ambiguous_base={weight_stats['ambiguous_base']}"
+        )
+        print(
+            "Weight match: "
+            f"matched_path={match_stats['matched_path']} "
+            f"matched_basename={match_stats['matched_basename']} "
+            f"missing={match_stats['missing']} "
+            f"ambiguous_basename={match_stats['ambiguous_basename']} "
+            f"bad_weight={match_stats['bad_weight']}"
+        )
+        if not np.all(weight_keep_mask):
+            W = W[weight_keep_mask]
+            good_paths = [p for p, keep in zip(good_paths, weight_keep_mask) if keep]
+            weights = weights[weight_keep_mask]
+            print(f"Samples kept after weight filtering: {W.shape[0]}")
+        if W.size == 0:
+            print("No samples left after weight filtering; aborting.")
+            return 1
+
     grid, z_grid, W = apply_z_range(grid, z_grid, W, zmin=zmin, zmax=zmax)
     if W.size == 0 or grid.size == 0:
         print("No bins left after z-range selection; aborting.")
         return 1
+    if x_log10 and np.any(grid <= 0):
+        print("ERROR: x_log10 requires positive grid values; set zmin>0 or use_a=True.")
+        return 1
 
     all_good_paths = list(good_paths)
-    W, good_paths, keep_mask, _ = apply_trimming(
-        W, all_good_paths, trim_frac=trim_frac, trim_quantile=trim_quantile
+    W, weights, good_paths, keep_mask, _ = apply_trimming(
+        W, weights, all_good_paths, trim_frac=trim_frac, trim_quantile=trim_quantile
     )
     if W.size == 0:
         print("No samples left after trimming; aborting.")
@@ -401,9 +604,9 @@ def main() -> int:
         print(f"Wrote trimmed samples list: {trim_report}")
 
     w_bins = np.linspace(wmin, wmax, n_wbin + 1)
-    D = build_density(W, w_bins)
+    D = build_density(W, w_bins, weights)
     D = smooth_density(D, smooth_sigma)
-    stats = compute_stats(W)
+    stats = compute_stats(W, weights)
 
     grid_label = "a" if use_a else "z"
     out_png = out_dir / f"wDE_density_{grid_label}.png"
@@ -421,6 +624,7 @@ def main() -> int:
         reverse_cmap=reverse_cmap,
         add_colorbar=add_colorbar,
         show_legend=show_legend,
+        x_log10=x_log10,
         dpi=dpi,
         log_vmin=log_vmin,
     )
