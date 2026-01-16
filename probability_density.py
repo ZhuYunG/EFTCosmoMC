@@ -19,9 +19,9 @@ from matplotlib.colors import LogNorm
 # Editable parameters
 # -------------------------
 folder = "EFTCAMB"
-folders = ["/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a00_1"]  # If non-empty, read from multiple folders (overrides `folder`)
+folders = ["/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a01_1"]  # If non-empty, read from multiple folders (overrides `folder`)
 pattern = "Horndeski_sample_*.dat"
-out_folder = "/Users/dcz/data/plots_a00_1"
+out_folder = "/Users/dcz/data/plots_a01_1"
 
 use_a = False  # False -> use z (col 2), True -> use a (col 1)
 zmin = 0.1  # e.g. 0.0; use None to disable
@@ -33,7 +33,7 @@ n_wbin = 250
 smooth_sigma = 0.15  # set >0 to enable Gaussian smoothing in w direction
 use_log = False  # optional log color scale
 reverse_cmap = False
-add_colorbar = True
+add_colorbar = False
 show_legend = False
 x_log10 = True  # log10 scale for x-axis (requires positive x)
 
@@ -49,8 +49,8 @@ trim_quantile = None  # e.g. 0.995; ignored if trim_frac > 0
 write_trim_report = True
 
 # Weight options
-weight_csv = "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a00_1.csv"  # path or list of paths; CSV has N columns, see weight_col
-weight_col = 8  # 0-based index; 8 -> 9th column
+weight_csv = "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a01_1.csv"  # path or list of paths; CSV has N columns, see weight_col
+weight_col = 12  # 0-based index; 8 -> 9th column
 weight_key_mode = "auto"  # "auto", "path", or "basename"
 missing_weight = "skip"  # "skip", "unity", or "error"
 # -------------------------
@@ -450,9 +450,8 @@ def plot_density(
     log_vmin: float | None,
 ) -> None:
     grid_edges = compute_edges(grid)
-    cmap = None
-    if reverse_cmap:
-        cmap = plt.get_cmap().reversed()
+    base_cmap = plt.get_cmap("Blues")
+    cmap = base_cmap.reversed() if reverse_cmap else base_cmap
 
     norm = None
     if use_log:
@@ -478,13 +477,16 @@ def plot_density(
         cbar.set_label(f"p(w | {grid_label})")
 
     mean, q16, q84, q025, q975, q005, q995 = stats
+    c68 = base_cmap(0.85)
+    c95 = base_cmap(0.65)
+    c99 = base_cmap(0.45)
     ax.plot(grid, mean, color="white", lw=1.6, label="mean")
-    ax.plot(grid, q16, color="white", ls="--", lw=1.0, label="68%")
-    ax.plot(grid, q84, color="white", ls="--", lw=1.0)
-    ax.plot(grid, q025, color="white", ls=":", lw=1.0, label="95%")
-    ax.plot(grid, q975, color="white", ls=":", lw=1.0)
-    ax.plot(grid, q005, color="white", ls="-.", lw=1.0, label="99%")
-    ax.plot(grid, q995, color="white", ls="-.", lw=1.0)
+    ax.plot(grid, q16, color=c68, ls="--", lw=1.1, label="68%")
+    ax.plot(grid, q84, color=c68, ls="--", lw=1.1)
+    ax.plot(grid, q025, color=c95, ls=":", lw=1.1, label="95%")
+    ax.plot(grid, q975, color=c95, ls=":", lw=1.1)
+    ax.plot(grid, q005, color=c99, ls="-.", lw=1.1, label="99%")
+    ax.plot(grid, q995, color=c99, ls="-.", lw=1.1)
 
     if x_log10:
         ax.set_xscale("log", base=10)
