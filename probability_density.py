@@ -19,16 +19,16 @@ from matplotlib.colors import LogNorm
 # Editable parameters
 # -------------------------
 folder = "EFTCAMB"
-folders = ["/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a01_1"]  # If non-empty, read from multiple folders (overrides `folder`)
+folders = ["/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a01_1", "/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a01_2", "/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a00_1", "/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a00_2"]  # If non-empty, read from multiple folders (overrides `folder`)
 pattern = "Horndeski_sample_*.dat"
-out_folder = "/Users/dcz/data/plots_a01_1"
+out_folder = "/Users/dcz/data/plots/plots_a01_1plus2_a00_1plus2"
 
 use_a = False  # False -> use z (col 2), True -> use a (col 1)
 zmin = 0.1  # e.g. 0.0; use None to disable
 zmax = 6.0  # e.g. 2.0; use None to disable
 
 wmin, wmax = -2.0, 1.0
-n_wbin = 250
+n_wbin = 1000
 
 smooth_sigma = 0.15  # set >0 to enable Gaussian smoothing in w direction
 use_log = False  # optional log color scale
@@ -36,6 +36,8 @@ reverse_cmap = False
 add_colorbar = False
 show_legend = False
 x_log10 = True  # log10 scale for x-axis (requires positive x)
+quantile_fill = True  # True: fill between quantiles; False: use density map
+x_interp_n = 1000  # >0 enables interpolation along x (e.g. 1000); 0 disables
 
 dpi = 500
 write_quantiles = True
@@ -49,7 +51,7 @@ trim_quantile = None  # e.g. 0.995; ignored if trim_frac > 0
 write_trim_report = True
 
 # Weight options
-weight_csv = "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a01_1.csv"  # path or list of paths; CSV has N columns, see weight_col
+weight_csv = ["/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a01_1.csv", "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a01_2.csv", "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a00_1.csv", "/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a00_2.csv"]  # path or list of paths; CSV has N columns, see weight_col
 weight_col = 12  # 0-based index; 8 -> 9th column
 weight_key_mode = "auto"  # "auto", "path", or "basename"
 missing_weight = "skip"  # "skip", "unity", or "error"
@@ -352,6 +354,121 @@ def compute_stats(W: np.ndarray, weights: np.ndarray) -> tuple[np.ndarray, ...]:
     return mean, q16, q84, q025, q975, q005, q995
 
 
+def build_quantile_gradient(
+    w_centers: np.ndarray, stats: tuple[np.ndarray, ...]
+) -> np.ndarray:
+    mean, q16, q84, q025, q975, q005, q995 = stats
+    n_grid = mean.size
+    n_w = w_centers.size
+    D = np.zeros((n_grid, n_w), dtype=float)
+
+    for i in range(n_grid):
+        m = mean[i]
+        q16i = q16[i]
+        q84i = q84[i]
+        q025i = q025[i]
+        q975i = q975[i]
+        q005i = q005[i]
+        q995i = q995[i]
+
+        if not np.all(np.isfinite([m, q16i, q84i, q025i, q975i, q005i, q995i])):
+            continue
+        if not (q005i <= q025i <= q16i <= m <= q84i <= q975i <= q995i):
+            continue
+
+        w = w_centers
+        t = np.full_like(w, np.nan, dtype=float)
+
+        if q16i < m:
+            mask = (w >= q16i) & (w <= m)
+            t[mask] = (m - w[mask]) / (m - q16i)
+        if q025i < q16i:
+            mask = (w >= q025i) & (w < q16i)
+            t[mask] = 1.0 + (q16i - w[mask]) / (q16i - q025i)
+        if q005i < q025i:
+            mask = (w >= q005i) & (w < q025i)
+            t[mask] = 2.0 + (q025i - w[mask]) / (q025i - q005i)
+
+        if q84i > m:
+            mask = (w <= q84i) & (w >= m)
+            t[mask] = (w[mask] - m) / (q84i - m)
+        if q975i > q84i:
+            mask = (w > q84i) & (w <= q975i)
+            t[mask] = 1.0 + (w[mask] - q84i) / (q975i - q84i)
+        if q995i > q975i:
+            mask = (w > q975i) & (w <= q995i)
+            t[mask] = 2.0 + (w[mask] - q975i) / (q995i - q975i)
+
+        intensity = np.exp(-0.5 * t**2)
+        intensity[~np.isfinite(t)] = 0.0
+        D[i, :] = intensity
+
+    return D
+
+
+def interpolate_for_plot(
+    grid: np.ndarray,
+    stats: tuple[np.ndarray, ...],
+    D: np.ndarray | None,
+    x_interp_n: int,
+    x_log10: bool,
+) -> tuple[np.ndarray, tuple[np.ndarray, ...], np.ndarray | None]:
+    if x_interp_n <= 0 or grid.size < 2:
+        return grid, stats, D
+    if x_interp_n < 2:
+        print("x_interp_n < 2; interpolation skipped.")
+        return grid, stats, D
+
+    x = np.asarray(grid, dtype=float)
+    stats_arrays = [np.asarray(s, dtype=float) for s in stats]
+    D_work = D
+
+    diffs = np.diff(x)
+    ascending = np.all(diffs > 0)
+    descending = np.all(diffs < 0)
+    was_descending = descending
+
+    if not (ascending or descending):
+        order = np.argsort(x)
+        x = x[order]
+        stats_arrays = [s[order] for s in stats_arrays]
+        if D_work is not None:
+            D_work = D_work[order, :]
+        print("WARNING: x grid is not monotonic; sorted for interpolation.")
+    elif descending:
+        x = x[::-1]
+        stats_arrays = [s[::-1] for s in stats_arrays]
+        if D_work is not None:
+            D_work = D_work[::-1, :]
+
+    if x_log10:
+        if np.any(x <= 0):
+            raise ValueError("x_log10 requires positive grid values.")
+        x_base = np.log10(x)
+        x_new_base = np.linspace(x_base[0], x_base[-1], x_interp_n)
+        x_new = np.power(10.0, x_new_base)
+    else:
+        x_base = x
+        x_new = np.linspace(x[0], x[-1], x_interp_n)
+        x_new_base = x_new
+
+    stats_new = tuple(np.interp(x_new_base, x_base, s) for s in stats_arrays)
+
+    D_new = None
+    if D_work is not None:
+        D_new = np.empty((x_interp_n, D_work.shape[1]), dtype=float)
+        for j in range(D_work.shape[1]):
+            D_new[:, j] = np.interp(x_new_base, x_base, D_work[:, j])
+
+    if was_descending:
+        x_new = x_new[::-1]
+        stats_new = tuple(s[::-1] for s in stats_new)
+        if D_new is not None:
+            D_new = D_new[::-1, :]
+
+    return x_new, stats_new, D_new
+
+
 def apply_z_range(
     grid: np.ndarray,
     z_grid: np.ndarray,
@@ -435,7 +552,7 @@ def apply_trimming(
 def plot_density(
     grid: np.ndarray,
     w_bins: np.ndarray,
-    D: np.ndarray,
+    D: np.ndarray | None,
     stats: tuple[np.ndarray, ...],
     out_path: Path,
     grid_label: str,
@@ -446,6 +563,7 @@ def plot_density(
     add_colorbar: bool,
     show_legend: bool,
     x_log10: bool,
+    quantile_fill: bool,
     dpi: int,
     log_vmin: float | None,
 ) -> None:
@@ -454,39 +572,57 @@ def plot_density(
     cmap = base_cmap.reversed() if reverse_cmap else base_cmap
 
     norm = None
-    if use_log:
-        positive = D[D > 0]
-        if positive.size > 0:
-            vmin = log_vmin if log_vmin is not None else positive.min()
-            norm = LogNorm(vmin=vmin, vmax=positive.max())
-        else:
-            print("No positive density values; using linear scale.")
-
     fig, ax = plt.subplots(figsize=figsize)
-    mesh = ax.pcolormesh(
-        grid_edges,
-        w_bins,
-        D.T,
-        shading="auto",
-        cmap=cmap,
-        norm=norm,
-    )
+    mesh = None
+    if quantile_fill:
+        w_centers = 0.5 * (w_bins[:-1] + w_bins[1:])
+        Dq = build_quantile_gradient(w_centers, stats)
+        mesh = ax.pcolormesh(
+            grid_edges,
+            w_bins,
+            Dq.T,
+            shading="auto",
+            cmap=cmap,
+        )
+        if add_colorbar:
+            cbar = fig.colorbar(mesh, ax=ax)
+            cbar.set_label(f"quantile shading ({grid_label})")
+    else:
+        if D is None:
+            raise ValueError("Density map requested but D is None.")
+        if use_log:
+            positive = D[D > 0]
+            if positive.size > 0:
+                vmin = log_vmin if log_vmin is not None else positive.min()
+                norm = LogNorm(vmin=vmin, vmax=positive.max())
+            else:
+                print("No positive density values; using linear scale.")
 
-    if add_colorbar:
-        cbar = fig.colorbar(mesh, ax=ax)
-        cbar.set_label(f"p(w | {grid_label})")
+        mesh = ax.pcolormesh(
+            grid_edges,
+            w_bins,
+            D.T,
+            shading="auto",
+            cmap=cmap,
+            norm=norm,
+        )
+
+        if add_colorbar:
+            cbar = fig.colorbar(mesh, ax=ax)
+            cbar.set_label(f"p(w | {grid_label})")
 
     mean, q16, q84, q025, q975, q005, q995 = stats
     c68 = base_cmap(0.85)
     c95 = base_cmap(0.65)
     c99 = base_cmap(0.45)
     ax.plot(grid, mean, color="white", lw=1.6, label="mean")
-    ax.plot(grid, q16, color=c68, ls="--", lw=1.1, label="68%")
-    ax.plot(grid, q84, color=c68, ls="--", lw=1.1)
-    ax.plot(grid, q025, color=c95, ls=":", lw=1.1, label="95%")
-    ax.plot(grid, q975, color=c95, ls=":", lw=1.1)
-    ax.plot(grid, q005, color=c99, ls="-.", lw=1.1, label="99%")
-    ax.plot(grid, q995, color=c99, ls="-.", lw=1.1)
+    ax.plot(grid, q16, color=c68, lw=1.1, label="68%")
+    ax.plot(grid, q84, color=c68, lw=1.1)
+    ax.plot(grid, q025, color=c95, lw=1.1, label="95%")
+    ax.plot(grid, q975, color=c95, lw=1.1)
+    ax.plot(grid, q005, color=c99, lw=1.1, label="99%")
+    ax.plot(grid, q995, color=c99, lw=1.1)
+    ax.axhline(-1.0, color="black", ls="--", lw=1.2)
 
     if x_log10:
         ax.set_xscale("log", base=10)
@@ -606,18 +742,24 @@ def main() -> int:
         print(f"Wrote trimmed samples list: {trim_report}")
 
     w_bins = np.linspace(wmin, wmax, n_wbin + 1)
-    D = build_density(W, w_bins, weights)
-    D = smooth_density(D, smooth_sigma)
+    D = None
+    if not quantile_fill:
+        D = build_density(W, w_bins, weights)
+        D = smooth_density(D, smooth_sigma)
     stats = compute_stats(W, weights)
+
+    plot_grid, plot_stats, plot_D = interpolate_for_plot(
+        grid, stats, D, x_interp_n=x_interp_n, x_log10=x_log10
+    )
 
     grid_label = "a" if use_a else "z"
     out_png = out_dir / f"wDE_density_{grid_label}.png"
 
     plot_density(
-        grid=grid,
+        grid=plot_grid,
         w_bins=w_bins,
-        D=D,
-        stats=stats,
+        D=plot_D,
+        stats=plot_stats,
         out_path=out_png,
         grid_label=grid_label,
         wmin=wmin,
@@ -627,6 +769,7 @@ def main() -> int:
         add_colorbar=add_colorbar,
         show_legend=show_legend,
         x_log10=x_log10,
+        quantile_fill=quantile_fill,
         dpi=dpi,
         log_vmin=log_vmin,
     )

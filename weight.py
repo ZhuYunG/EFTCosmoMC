@@ -4,9 +4,9 @@ import csv
 import numpy as np
 
 # Parameters
-folder = Path("/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a01_1")
+folder = Path("/Users/dcz/data/Horndeski_samples/Horndeski_samples_py_onlybackground_a00_2")
 pattern = "Horndeski_sample_*.dat"
-out_csv = Path("/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a01_1.csv")
+out_csv = Path("/Users/dcz/data/weights/Horndeski_samples_py_onlybackground_a00_2.csv")
 sn_mu_table_path = Path("/Users/dcz/data/SCPUnion2.1_mu_vs_z.txt")
 sn_cov_path = Path("/Users/dcz/data/SCPUnion2.1_covmat_sys.txt")
 use_sn_cov_systematics = True
